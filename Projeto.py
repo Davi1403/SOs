@@ -1,14 +1,13 @@
 import flet as ft
-import threading
+import multiprocessing
 import time
 import requests
 from datetime import datetime
 import pandas as pd
-from tqdm import tqdm
+import threading
 
-lock = threading.Lock()
 
-# Função do relógio
+# Função do relógio (permanece como thread para atualização contínua da interface)
 def clock_tab(page: ft.Page):
     time_display = ft.Text(value="00:00:00", size=50, weight="bold")
 
@@ -17,7 +16,7 @@ def clock_tab(page: ft.Page):
             current_time = datetime.now().strftime("%H:%M:%S")
             time_display.value = current_time
             page.update()
-            time.sleep(1)
+            time.sleep(1)   
 
     clock_thread = threading.Thread(target=update_clock, daemon=True)
     clock_thread.start()
@@ -33,34 +32,30 @@ def get_coin():
     quotation = requests.get("https://economia.awesomeapi.com.br/last/USD-BRL,EUR-BRL,BTC-BRL")
     return quotation.json()
 
-def timer_coin(update_coin_table):
+def process_coin(queue):
     df_coin = pd.DataFrame(columns=['time', 'dollar', 'euro'])
+    time.sleep(5)       
 
-    for _ in tqdm(range(10)):
-        with lock:
-            quotation = get_coin()
-            current_time = datetime.now().strftime('%H:%M:%S')
+    for _ in range(10):  # Limita o número de atualizações
+        quotation = get_coin()
+        current_time = datetime.now().strftime('%H:%M:%S')
 
-            if quotation is not None:
-                new_row = {
-                    "time": current_time,
-                    "dollar": f"${quotation['USDBRL']['bid']}",
-                    "euro": f"${quotation['EURBRL']['bid']}"
-                }
-            else:
-                new_row = {
-                    "time": "Error",
-                    "dollar": "Error",
-                    "euro": "Error"
-                }
+        if quotation:
+            new_row = {
+                "time": current_time,
+                "dollar": f"${quotation['USDBRL']['bid']}",
+                "euro": f"${quotation['EURBRL']['bid']}"
+            }
+        else:
+            new_row = {
+                "time": "Error",
+                "dollar": "Error",
+                "euro": "Error"
+            }
 
-            df_coin = pd.concat([df_coin, pd.DataFrame([new_row])], ignore_index=True)
-            tqdm.write(str(df_coin.tail(1)))
-            print("\n_________________________________________\n")
-
-            # Atualiza a tabela na interface
-            update_coin_table(df_coin)
-            time.sleep(10)
+        df_coin = pd.concat([df_coin, pd.DataFrame([new_row])], ignore_index=True)
+        queue.put(df_coin)  # Envia os dados para a fila
+        time.sleep(10)
 
 # Funções para cotações de criptomoedas
 def get_cripto():
@@ -69,38 +64,34 @@ def get_cripto():
     quotation = requests.get(url, params=params)
     return quotation.json()
 
-def timer_cripto(update_cripto_table):
+def process_cripto(queue):
     df_cripto = pd.DataFrame(columns=['time', 'bitcoin', 'ethereum', 'litecoin'])
 
-    for _ in tqdm(range(10)):
-        with lock:
-            quotation = get_cripto()
-            current_time = datetime.now().strftime('%H:%M:%S')
+    for _ in range(10):  # Limita o número de atualizações
+        quotation = get_cripto()
+        current_time = datetime.now().strftime('%H:%M:%S')
 
-            if quotation is not None:
-                new_row = {
-                    "time": current_time,
-                    "bitcoin": f"${quotation['bitcoin']['usd']:.2f}",
-                    "ethereum": f"${quotation['ethereum']['usd']:.2f}",
-                    "litecoin": f"${quotation['litecoin']['usd']:.2f}"
-                }
-            else:
-                new_row = {
-                    "time": "Error",
-                    "bitcoin": "Error",
-                    "ethereum": "Error",
-                    "litecoin": "Error"
-                }
+        if quotation:
+            new_row = {
+                "time": current_time,
+                "bitcoin": f"${quotation['bitcoin']['usd']:.2f}",
+                "ethereum": f"${quotation['ethereum']['usd']:.2f}",
+                "litecoin": f"${quotation['litecoin']['usd']:.2f}"
+            }
+        else:
+            new_row = {
+                "time": "Error",
+                "bitcoin": "Error",
+                "ethereum": "Error",
+                "litecoin": "Error"
+            }
 
-            df_cripto = pd.concat([df_cripto, pd.DataFrame([new_row])], ignore_index=True)
-            tqdm.write(str(df_cripto.tail(1)))
-            print("\n_________________________________________\n")
-
-            update_cripto_table(df_cripto)
-            time.sleep(10)
+        df_cripto = pd.concat([df_cripto, pd.DataFrame([new_row])], ignore_index=True)
+        queue.put(df_cripto)  # Envia os dados para a fila
+        time.sleep(10)
 
 # Função para criar a aba de moedas e criptomoedas
-def coins_tab(page: ft.Page):
+def coins_tab(page: ft.Page, queue_coin, queue_cripto):
     # Criação das tabelas
     coin_table = ft.DataTable(
         columns=[
@@ -150,6 +141,20 @@ def coins_tab(page: ft.Page):
             )
         page.update()
 
+    # Atualiza as tabelas com base nas filas
+    def monitor_queues():
+        while True:
+            if not queue_coin.empty():
+                df_coin = queue_coin.get()
+                update_coin_table(df_coin)
+            if not queue_cripto.empty():
+                df_cripto = queue_cripto.get()
+                update_cripto_table(df_cripto)
+            time.sleep(1)
+
+    monitor_thread = threading.Thread(target=monitor_queues, daemon=True)
+    monitor_thread.start()
+
     # Layout da página com as duas colunas
     content = ft.Row(
         [
@@ -174,13 +179,6 @@ def coins_tab(page: ft.Page):
         alignment=ft.MainAxisAlignment.CENTER
     )
 
-    # Iniciar threads
-    coin_thread = threading.Thread(target=timer_coin, args=(update_coin_table,), daemon=True)
-    cripto_thread = threading.Thread(target=timer_cripto, args=(update_cripto_table,), daemon=True)
-
-    coin_thread.start()
-    cripto_thread.start()
-
     return content
 
 # Função principal
@@ -190,11 +188,21 @@ def main(page: ft.Page):
     page.vertical_alignment = ft.MainAxisAlignment.CENTER
     page.padding = 20
 
+    # Filas para comunicação entre processos
+    queue_coin = multiprocessing.Queue()
+    queue_cripto = multiprocessing.Queue()
+
+    # Iniciar processos
+    coin_process = multiprocessing.Process(target=process_coin, args=(queue_coin,))
+    cripto_process = multiprocessing.Process(target=process_cripto, args=(queue_cripto,))
+    coin_process.start()
+    cripto_process.start()
+
     # Definir abas
     tabs = ft.Tabs(
         tabs=[
             ft.Tab(text="Relógio", content=clock_tab(page)),
-            ft.Tab(text="Moedas", content=coins_tab(page))
+            ft.Tab(text="Moedas", content=coins_tab(page, queue_coin, queue_cripto))
         ],
         expand=True
     )
