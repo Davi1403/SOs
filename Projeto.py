@@ -7,39 +7,47 @@ import pandas as pd
 import threading
 
 
-# Função do relógio (permanece como thread para atualização contínua da interface)
+# Função para a aba do relógio (permanece como thread para atualização contínua da interface)
 def clock_tab(page: ft.Page):
+    # Cria um elemento de texto para exibir a hora atual
     time_display = ft.Text(value="00:00:00", size=50, weight="bold")
 
+    # Função para atualizar a hora continuamente
     def update_clock():
         while True:
-            current_time = datetime.now().strftime("%H:%M:%S")
-            time_display.value = current_time
-            page.update()
-            time.sleep(1)   
+            current_time = datetime.now().strftime("%H:%M:%S")  # Obtém a hora atual
+            time_display.value = current_time  # Atualiza o valor do texto com a hora atual
+            page.update()  # Atualiza a interface da página
+            time.sleep(1)  # Aguarda 1 segundo antes da próxima atualização
 
+    # Inicia um thread para executar a função update_clock em segundo plano
     clock_thread = threading.Thread(target=update_clock, daemon=True)
     clock_thread.start()
 
+    # Retorna o container que exibe a hora no centro da página
     return ft.Container(
         content=time_display,
         alignment=ft.alignment.center,
         expand=True
     )
 
-# Funções para cotações de moedas
+# Função para obter as cotações de moedas (dólar e euro)
 def get_coin():
     quotation = requests.get("https://economia.awesomeapi.com.br/last/USD-BRL,EUR-BRL,BTC-BRL")
     return quotation.json()
 
+# Função de processo para atualizar cotações de moedas periodicamente
 def process_coin(queue):
+    # Cria um DataFrame vazio para armazenar as cotações
     df_coin = pd.DataFrame(columns=['time', 'dollar', 'euro'])
-    time.sleep(5)       
+    time.sleep(5)  # Aguarda 5 segundos antes de iniciar a primeira atualização
 
-    for _ in range(10):  # Limita o número de atualizações
-        quotation = get_coin()
-        current_time = datetime.now().strftime('%H:%M:%S')
+    # Limita o número de atualizações para 10 ciclos
+    for _ in range(10):
+        quotation = get_coin()  # Obtém as cotações da API
+        current_time = datetime.now().strftime('%H:%M:%S')  # Obtém a hora atual
 
+        # Adiciona uma nova linha ao DataFrame com as cotações
         if quotation:
             new_row = {
                 "time": current_time,
@@ -53,24 +61,29 @@ def process_coin(queue):
                 "euro": "Error"
             }
 
+        # Concatena o DataFrame com a nova linha e coloca-o na fila para a interface
         df_coin = pd.concat([df_coin, pd.DataFrame([new_row])], ignore_index=True)
-        queue.put(df_coin)  # Envia os dados para a fila
-        time.sleep(10)
+        queue.put(df_coin)
+        time.sleep(10)  # Aguarda 10 segundos para a próxima atualização
 
-# Funções para cotações de criptomoedas
+# Função para obter as cotações de criptomoedas (Bitcoin, Ethereum e Litecoin)
 def get_cripto():
     url = 'https://api.coingecko.com/api/v3/simple/price'
     params = {'ids': 'bitcoin,ethereum,litecoin', 'vs_currencies': 'usd'}
     quotation = requests.get(url, params=params)
     return quotation.json()
 
+# Função de processo para atualizar cotações de criptomoedas periodicamente
 def process_cripto(queue):
+    # Cria um DataFrame vazio para armazenar as cotações
     df_cripto = pd.DataFrame(columns=['time', 'bitcoin', 'ethereum', 'litecoin'])
 
-    for _ in range(10):  # Limita o número de atualizações
-        quotation = get_cripto()
-        current_time = datetime.now().strftime('%H:%M:%S')
+    # Limita o número de atualizações para 10 ciclos
+    for _ in range(10):
+        quotation = get_cripto()  # Obtém as cotações da API
+        current_time = datetime.now().strftime('%H:%M:%S')  # Obtém a hora atual
 
+        # Adiciona uma nova linha ao DataFrame com as cotações
         if quotation:
             new_row = {
                 "time": current_time,
@@ -86,13 +99,14 @@ def process_cripto(queue):
                 "litecoin": "Error"
             }
 
+        # Concatena o DataFrame com a nova linha e coloca-o na fila para a interface
         df_cripto = pd.concat([df_cripto, pd.DataFrame([new_row])], ignore_index=True)
-        queue.put(df_cripto)  # Envia os dados para a fila
-        time.sleep(10)
+        queue.put(df_cripto)
+        time.sleep(10)  # Aguarda 10 segundos para a próxima atualização
 
-# Função para criar a aba de moedas e criptomoedas
+# Função para criar a aba de exibição das cotações de moedas e criptomoedas
 def coins_tab(page: ft.Page, queue_coin, queue_cripto):
-    # Criação das tabelas
+    # Cria uma tabela para exibir cotações de moedas
     coin_table = ft.DataTable(
         columns=[
             ft.DataColumn(ft.Text("Time")),
@@ -102,6 +116,7 @@ def coins_tab(page: ft.Page, queue_coin, queue_cripto):
         rows=[]
     )
 
+    # Cria uma tabela para exibir cotações de criptomoedas
     cripto_table = ft.DataTable(
         columns=[
             ft.DataColumn(ft.Text("Time")),
@@ -112,8 +127,9 @@ def coins_tab(page: ft.Page, queue_coin, queue_cripto):
         rows=[]
     )
 
+    # Função para atualizar a tabela de moedas
     def update_coin_table(df):
-        coin_table.rows.clear()
+        coin_table.rows.clear()  # Limpa as linhas da tabela
         for _, row in df.iterrows():
             coin_table.rows.append(
                 ft.DataRow(
@@ -124,10 +140,11 @@ def coins_tab(page: ft.Page, queue_coin, queue_cripto):
                     ]
                 )
             )
-        page.update()
+        page.update()  # Atualiza a interface da página
 
+    # Função para atualizar a tabela de criptomoedas
     def update_cripto_table(df):
-        cripto_table.rows.clear()
+        cripto_table.rows.clear()  # Limpa as linhas da tabela
         for _, row in df.iterrows():
             cripto_table.rows.append(
                 ft.DataRow(
@@ -139,23 +156,26 @@ def coins_tab(page: ft.Page, queue_coin, queue_cripto):
                     ]
                 )
             )
-        page.update()
+        page.update()  # Atualiza a interface da página
 
-    # Atualiza as tabelas com base nas filas
+    # Função para monitorar as filas e atualizar as tabelas
     def monitor_queues():
         while True:
+            # Verifica se há novos dados na fila de moedas
             if not queue_coin.empty():
                 df_coin = queue_coin.get()
                 update_coin_table(df_coin)
+            # Verifica se há novos dados na fila de criptomoedas
             if not queue_cripto.empty():
                 df_cripto = queue_cripto.get()
                 update_cripto_table(df_cripto)
-            time.sleep(1)
+            time.sleep(1)  # Aguarda 1 segundo antes de verificar novamente
 
+    # Inicia um thread para monitorar as filas
     monitor_thread = threading.Thread(target=monitor_queues, daemon=True)
     monitor_thread.start()
 
-    # Layout da página com as duas colunas
+    # Layout da aba com duas colunas (moedas e criptomoedas)
     content = ft.Row(
         [
             ft.Column(
@@ -164,16 +184,16 @@ def coins_tab(page: ft.Page, queue_coin, queue_cripto):
                     coin_table,
                 ],
                 alignment=ft.MainAxisAlignment.CENTER,
-                width=400  # Largura da coluna
+                width=400
             ),
-            ft.VerticalDivider(),  # Divisor entre as colunas
+            ft.VerticalDivider(),
             ft.Column(
                 [
                     ft.Text("Cotações de Criptomoedas", size=20, weight="bold"),
                     cripto_table,
                 ],
                 alignment=ft.MainAxisAlignment.CENTER,
-                width=400  # Largura da coluna
+                width=400
             )
         ],
         alignment=ft.MainAxisAlignment.CENTER
@@ -181,24 +201,25 @@ def coins_tab(page: ft.Page, queue_coin, queue_cripto):
 
     return content
 
-# Função principal
+# Função principal para configurar a página e iniciar os processos
 def main(page: ft.Page):
+    # Configura a página principal
     page.title = "Relógio e Cotações"
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
     page.vertical_alignment = ft.MainAxisAlignment.CENTER
     page.padding = 20
 
-    # Filas para comunicação entre processos
+    # Cria filas para comunicação entre processos
     queue_coin = multiprocessing.Queue()
     queue_cripto = multiprocessing.Queue()
 
-    # Iniciar processos
+    # Inicia os processos para atualizar as cotações de moedas e criptomoedas
     coin_process = multiprocessing.Process(target=process_coin, args=(queue_coin,))
     cripto_process = multiprocessing.Process(target=process_cripto, args=(queue_cripto,))
     coin_process.start()
     cripto_process.start()
 
-    # Definir abas
+    # Define as abas (Relógio e Cotações)
     tabs = ft.Tabs(
         tabs=[
             ft.Tab(text="Relógio", content=clock_tab(page)),
@@ -207,6 +228,7 @@ def main(page: ft.Page):
         expand=True
     )
 
+    # Adiciona as abas à página
     page.add(tabs)
 
 # Inicia o aplicativo Flet
