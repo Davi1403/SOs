@@ -5,8 +5,9 @@ import requests
 from datetime import datetime
 import pandas as pd
 import threading
+import psutil
 
-# Função para a aba do relógio (permanece como thread para atualização contínua da interface)
+# Função para a aba do relógio
 def clock_tab(page: ft.Page):
     time_display = ft.Text(value="00:00:00", size=50, weight="bold")
 
@@ -156,6 +157,37 @@ def coins_tab(page: ft.Page, queue_coin, queue_cripto):
 
     return content
 
+# Função para mostrar o status dos processos e uso de memória
+def process_status_tab(page: ft.Page, coin_process, cripto_process):
+    status_text = ft.Text(value="Aguardando...", size=20)
+
+    def update_process_status():
+        status = ''
+        while coin_process.is_alive() or cripto_process.is_alive():
+            try:
+                # Usando psutil para verificar o status real do processo
+                coin_proc = psutil.Process(coin_process.pid)
+                cripto_proc = psutil.Process(cripto_process.pid)
+
+                
+                # Monitorando a memória
+                mem_coin = coin_proc.memory_info().rss / (1024 * 1024)
+                mem_cripto = cripto_proc.memory_info().rss / (1024 * 1024)
+                status = f"Memória Coin: {mem_coin:.2f} MB\n"
+                status += f"Memória Cripto: {mem_cripto:.2f} MB"
+            except psutil.NoSuchProcess:
+                status = "Erro ao acessar processo"
+
+            status_text.value = status
+            page.update()
+            time.sleep(1)
+
+    status_thread = threading.Thread(target=update_process_status, daemon=True)
+    status_thread.start()
+
+    return ft.Container(content=status_text, alignment=ft.alignment.center, expand=True)
+
+
 # Função de encerramento seguro
 def terminate_processes(coin_process, cripto_process):
     coin_process.terminate()
@@ -177,10 +209,13 @@ def main(page: ft.Page):
     coin_process.start()
     cripto_process.start()
 
+   
+
     tabs = ft.Tabs(
         tabs=[
             ft.Tab(text="Relógio", content=clock_tab(page)),
-            ft.Tab(text="Moedas", content=coins_tab(page, queue_coin, queue_cripto))
+            ft.Tab(text="Moedas", content=coins_tab(page, queue_coin, queue_cripto)),
+            ft.Tab(text="Status", content=process_status_tab(page, coin_process, cripto_process))
         ],
         expand=True
     )
