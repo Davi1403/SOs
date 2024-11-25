@@ -32,7 +32,7 @@ def get_coin():
     quotation = requests.get("https://economia.awesomeapi.com.br/last/USD-BRL,EUR-BRL,BTC-BRL")
     return quotation.json()
 
-def process_coin(queue):
+def process_coin(queue, lock):
     df_coin = pd.DataFrame(columns=['time', 'dollar', 'euro'])
     time.sleep(5)
 
@@ -45,7 +45,8 @@ def process_coin(queue):
             "euro": f"${quotation['EURBRL']['bid']}" if quotation else "Error"
         }
         df_coin = pd.concat([df_coin, pd.DataFrame([new_row])], ignore_index=True)
-        queue.put(df_coin)
+        with lock:  # Protege o acesso à fila
+            queue.put(df_coin)
         time.sleep(10)
 
 def get_cripto():
@@ -54,7 +55,7 @@ def get_cripto():
     quotation = requests.get(url, params=params)
     return quotation.json()
 
-def process_cripto(queue):
+def process_cripto(queue, lock):
     df_cripto = pd.DataFrame(columns=['time', 'bitcoin', 'ethereum', 'litecoin'])
 
     for _ in range(10):
@@ -67,7 +68,8 @@ def process_cripto(queue):
             "litecoin": f"${quotation['litecoin']['usd']:.2f}" if quotation else "Error"
         }
         df_cripto = pd.concat([df_cripto, pd.DataFrame([new_row])], ignore_index=True)
-        queue.put(df_cripto)
+        with lock:  # Protege o acesso à fila
+            queue.put(df_cripto)
         time.sleep(10)
 
 def coins_tab(page: ft.Page, queue_coin, queue_cripto):
@@ -161,20 +163,21 @@ def coins_tab(page: ft.Page, queue_coin, queue_cripto):
 def process_status_tab(page: ft.Page, coin_process, cripto_process):
     status_text = ft.Text(value="Aguardando...", size=20)
 
-    def update_process_status():
-        status = ''
+    def update_process_status():    
         while coin_process.is_alive() or cripto_process.is_alive():
             try:
-                # Usando psutil para verificar o status real do processo
                 coin_proc = psutil.Process(coin_process.pid)
                 cripto_proc = psutil.Process(cripto_process.pid)
+                # Usa a biblioteca psutil para criar objetos que representam os processos,
+                # permitindo acessar informações detalhadas sobre eles.
 
-                
-                # Monitorando a memória
                 mem_coin = coin_proc.memory_info().rss / (1024 * 1024)
                 mem_cripto = cripto_proc.memory_info().rss / (1024 * 1024)
                 status = f"Memória Coin: {mem_coin:.2f} MB\n"
                 status += f"Memória Cripto: {mem_cripto:.2f} MB"
+                # Obtém o uso de memória residente (RSS) de cada processo, que está em bytes.
+                # Converte o valor para megabytes dividindo por (1024 * 1024).
+
             except psutil.NoSuchProcess:
                 status = "Erro ao acessar processo"
 
@@ -186,7 +189,6 @@ def process_status_tab(page: ft.Page, coin_process, cripto_process):
     status_thread.start()
 
     return ft.Container(content=status_text, alignment=ft.alignment.center, expand=True)
-
 
 # Função de encerramento seguro
 def terminate_processes(coin_process, cripto_process):
@@ -203,13 +205,12 @@ def main(page: ft.Page):
 
     queue_coin = multiprocessing.Queue()
     queue_cripto = multiprocessing.Queue()
+    lock = multiprocessing.Lock()  # Cria o Lock
 
-    coin_process = multiprocessing.Process(target=process_coin, args=(queue_coin,))
-    cripto_process = multiprocessing.Process(target=process_cripto, args=(queue_cripto,))
+    coin_process = multiprocessing.Process(target=process_coin, args=(queue_coin, lock))
+    cripto_process = multiprocessing.Process(target=process_cripto, args=(queue_cripto, lock))
     coin_process.start()
     cripto_process.start()
-
-   
 
     tabs = ft.Tabs(
         tabs=[
@@ -222,7 +223,6 @@ def main(page: ft.Page):
 
     page.add(tabs)
 
-    # Chama a função de encerramento ao fechar o aplicativo
     page.on_close = lambda: terminate_processes(coin_process, cripto_process)
 
 if __name__ == "__main__":
