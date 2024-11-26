@@ -6,6 +6,7 @@ from datetime import datetime
 import pandas as pd
 import threading
 import psutil
+import platform
 
 # Função para a aba do relógio
 def clock_tab(page: ft.Page):
@@ -163,23 +164,40 @@ def coins_tab(page: ft.Page, queue_coin, queue_cripto):
 def process_status_tab(page: ft.Page, coin_process, cripto_process):
     status_text = ft.Text(value="Aguardando...", size=20)
 
-    def update_process_status():    
+    def update_process_status():
+        try:
+            coin_proc = psutil.Process(coin_process.pid)
+            cripto_proc = psutil.Process(cripto_process.pid)
+
+            # Inicialize o uso de CPU com um intervalo
+            coin_proc.cpu_percent(interval=0.1)
+            cripto_proc.cpu_percent(interval=0.1)
+        except psutil.NoSuchProcess:
+            status_text.value = "Erro ao acessar processos"
+            page.update()
+            return
+
         while coin_process.is_alive() or cripto_process.is_alive():
             try:
-                coin_proc = psutil.Process(coin_process.pid)
-                cripto_proc = psutil.Process(cripto_process.pid)
-                # Usa a biblioteca psutil para criar objetos que representam os processos,
-                # permitindo acessar informações detalhadas sobre eles.
-
+                # Obter uso de memória
                 mem_coin = coin_proc.memory_info().rss / (1024 * 1024)
                 mem_cripto = cripto_proc.memory_info().rss / (1024 * 1024)
-                status = f"Memória Coin: {mem_coin:.2f} MB\n"
-                status += f"Memória Cripto: {mem_cripto:.2f} MB"
-                # Obtém o uso de memória residente (RSS) de cada processo, que está em bytes.
-                # Converte o valor para megabytes dividindo por (1024 * 1024).
 
+                # Obter uso de CPU sem intervalo
+                cpu_coin = coin_proc.cpu_percent()
+                cpu_cripto = cripto_proc.cpu_percent()
+
+                # Construir status
+                status = (
+                    f"Processo Coin:\n"
+                    f"  Memória: {mem_coin:.2f} MB\n"
+                    f"  CPU: {cpu_coin:.2f}%\n\n"
+                    f"Processo Cripto:\n"
+                    f"  Memória: {mem_cripto:.2f} MB\n"
+                    f"  CPU: {cpu_cripto:.2f}%"
+                )
             except psutil.NoSuchProcess:
-                status = "Erro ao acessar processo"
+                status = "Erro ao acessar processos"
 
             status_text.value = status
             page.update()
@@ -190,12 +208,43 @@ def process_status_tab(page: ft.Page, coin_process, cripto_process):
 
     return ft.Container(content=status_text, alignment=ft.alignment.center, expand=True)
 
+
+
 # Função de encerramento seguro
 def terminate_processes(coin_process, cripto_process):
     coin_process.terminate()
     cripto_process.terminate()
     coin_process.join()
     cripto_process.join()
+
+def system_info_tab(page: ft.Page):
+    info_text = ft.Text(value="Carregando informações do sistema...", size=20)
+
+    def fetch_system_info():
+        # Informações do sistema
+        os_info = f"{platform.system()} {platform.release()} ({platform.version()})"
+
+        # CPUs e memoria
+        cpu_count = psutil.cpu_count(logical=True)
+        mem_info = psutil.virtual_memory()
+        total_memory = mem_info.total / (1024**3)  # Convert to GB
+        available_memory = mem_info.available / (1024**3)
+
+
+        system_info = (
+            f"Sistema Operacional: {os_info}\n"
+            f"Número de CPUs: {cpu_count}\n"
+            f"Memória Total: {total_memory:.2f} GB\n"
+            f"Memória Disponível: {available_memory:.2f} GB\n\n"
+        )
+
+        info_text.value = system_info
+        page.update()
+
+    # Carrega as informações do sistema em uma thread separada
+    threading.Thread(target=fetch_system_info, daemon=True).start()
+
+    return ft.Container(content=info_text, alignment=ft.alignment.center, expand=True)
 
 def main(page: ft.Page):
     page.title = "Relógio e Cotações"
@@ -216,7 +265,8 @@ def main(page: ft.Page):
         tabs=[
             ft.Tab(text="Relógio", content=clock_tab(page)),
             ft.Tab(text="Moedas", content=coins_tab(page, queue_coin, queue_cripto)),
-            ft.Tab(text="Status", content=process_status_tab(page, coin_process, cripto_process))
+            ft.Tab(text="Status", content=process_status_tab(page, coin_process, cripto_process)),
+            ft.Tab(text="Informações do Sistema", content=system_info_tab(page))
         ],
         expand=True
     )
